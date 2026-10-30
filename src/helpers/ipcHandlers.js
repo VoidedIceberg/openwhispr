@@ -6197,7 +6197,13 @@ class IPCHandlers {
         }
         const modelPath = require("path").join(modelManager.modelsDir, modelInfo.model.fileName);
         const { ceiling } = await modelManager.contextCeiling(modelInfo, modelPath);
-        return { success: true, maxContextTokens: ceiling, modelName: modelInfo.model.name };
+        // A GenieX (NPU) model runs with a fixed --nctx window; the RAM-based
+        // ceiling says nothing about what the NPU will actually grant.
+        const maxContextTokens =
+          modelInfo.model.runtime === "geniex"
+            ? Math.min(ceiling, modelInfo.model.contextLength || ceiling)
+            : ceiling;
+        return { success: true, maxContextTokens, modelName: modelInfo.model.name };
       } catch (error) {
         return { success: false, error: error.message };
       }
@@ -6315,6 +6321,17 @@ class IPCHandlers {
       }
     });
 
+    // Qualcomm GenieX (NPU language models): platform gate, Qualcomm CPU
+    // detection, and whether the CLI is on PATH. The renderer uses it to
+    // badge and gate the Qualcomm tab.
+    ipcMain.handle("check-geniex-status", async () => {
+      try {
+        return await require("./geniexServer").getGeniexStatus();
+      } catch (error) {
+        return { supported: false, installed: false, error: error.message };
+      }
+    });
+
     ipcMain.handle("llama-cpp-check", async () => {
       try {
         const llamaCppInstaller = require("./llamaCppInstaller").default;
@@ -6349,22 +6366,15 @@ class IPCHandlers {
     ipcMain.handle("llama-server-start", async (event, modelId) => {
       try {
         const modelManager = require("./modelManagerBridge").default;
-        modelManager.ensureInitialized();
-        const modelInfo = modelManager.findModelById(modelId);
-        if (!modelInfo) {
-          return { success: false, error: `Model "${modelId}" not found` };
-        }
-
-        const modelPath = require("path").join(modelManager.modelsDir, modelInfo.model.fileName);
-
-        await modelManager.serverManager.start(
-          modelPath,
-          await modelManager.serverStartOptions(modelInfo)
-        );
-        modelManager.currentServerModelId = modelId;
+        // Resolves the model's runtime: a GenieX (NPU) model comes back on the
+        // GenieX server's port, everything else on the llama.cpp server — the
+        // streaming chat client only needs an OpenAI-compatible port. The
+        // served id is what the server answers requests for (GenieX cache refs
+        // differ from registry ids), so streaming clients send that.
+        const { port, servedModelId } = await modelManager.ensureServerForModel(modelId);
 
         this.environmentManager.saveAllKeysToEnvFile().catch(() => {});
-        return { success: true, port: modelManager.serverManager.port };
+        return { success: true, port, modelId: servedModelId };
       } catch (error) {
         return { success: false, error: error.message };
       }

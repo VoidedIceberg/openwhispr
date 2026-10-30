@@ -2355,6 +2355,20 @@ declare global {
         details?: Record<string, unknown>;
       }>;
       checkLocalReasoningAvailable: () => Promise<boolean>;
+      /** Snapdragon gate plus whether the GenieX CLI is installed; badges the Qualcomm (NPU) LLM tab. */
+      checkGeniexStatus: () => Promise<{
+        supported: boolean;
+        platformSupported?: boolean;
+        cpuQualcomm?: boolean;
+        cpuName?: string | null;
+        code?: string;
+        message?: string;
+        installed: boolean;
+        binaryPath?: string | null;
+        installerUrl?: string;
+        docsUrl?: string;
+        error?: string;
+      }>;
       /** The largest context this machine can give a bundled model; drives chunked note generation. */
       getLocalContextBudget: (modelId: string) => Promise<{
         success: boolean;
@@ -2427,7 +2441,13 @@ declare global {
       // llama-server
       llamaServerStart: (
         modelId: string
-      ) => Promise<{ success: boolean; port?: number; error?: string }>;
+      ) => Promise<{
+        success: boolean;
+        port?: number;
+        /** The id the server answers requests for — a GenieX cache ref differs from the registry id. */
+        modelId?: string;
+        error?: string;
+      }>;
       llamaServerStatus: () => Promise<LlamaServerStatus>;
       llamaGpuReset: () => Promise<{ success: boolean; error?: string }>;
       detectVulkanGpu?: () => Promise<VulkanGpuResult>;
